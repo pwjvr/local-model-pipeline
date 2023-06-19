@@ -1,4 +1,5 @@
 import typing
+import re
 
 import numpy as np
 import pandas as pd
@@ -128,3 +129,66 @@ class Preprocessor(BaseEstimator, TransformerMixin, LoggerMixin):
         )
 
         self.pipeline = col_trans
+
+    def _get_spec_num(self) -> typing.Dict:
+        """
+        Return info on how numeric vars were transformed
+        """
+        scaler = self.pipeline.named_transformers_['num']['scaler']
+        mean, std = scaler.mean_, np.sqrt(scaler.var_)
+        return {'mean': mean, 'standard_deviation': std}
+
+    def _get_spec_cat(self) -> typing.Dict:
+        """
+        Create some info around how cat vars was encoded
+        """
+        cat_spec = []
+        categorical_pipeline = self.pipeline.named_transformers_['cat']['onehot']
+        mappings = {f"x{i}": v for i,v in enumerate(self.cat_vars)}
+
+        for v in categorical_pipeline.get_feature_names():
+            pseudonym, *rest = v.split('_')
+            src = mappings.get(pseudonym)
+
+            rest = self._clean_value("".join(rest))
+
+            cat_spec.append({'source_var': src, 'sklearn_var': pseudonym, 'encoded_var': v, 'suffix': ''.join(rest)})
+
+        return cat_spec
+
+    def _get_spec_log(self) -> typing.Dict:
+        """
+        Because other transformations have this - but only log10 applied so no info returned
+        """
+        return {}
+
+    @staticmethod
+    def _clean_value(string):
+        """
+        Clean up whitespace, conform to lowercase, replace spaces with dashes and replace odd chars
+        """
+        string = string.strip()
+        string = string.lower()
+        string = re.sub(' +', '-', string)
+        string = re.sub(r'[^A-Za-z0-9-\.]+','-', string)
+        return string
+
+    @property
+    def feature_names(self) -> typing.List[str]:
+        """
+        Produce human-friendly feature names
+        """
+        feature_names = []
+        feature_names.extend(self._get_feature_names_cat())
+        feature_names.extend(self._get_feature_names_log())
+        feature_names.extend(self._get_feature_names_num())
+        return feature_names
+
+    @property
+    def transformation_spec(self) -> typing.Dict:
+        spec = {
+            'num': self._get_spec_num(),
+            'cat': self._get_spec_cat(),
+            'log': self._get_spec_log()
+        }
+        return spec
